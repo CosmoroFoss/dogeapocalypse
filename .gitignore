@@ -1,0 +1,11 @@
+# Directories
+
+node_modules
+
+# Files
+package.json
+package-lock.json
+
+# Ignore Vim swap files
+.*.swp
+.*.swo

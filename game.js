@@ -5,9 +5,10 @@
                 this.obstacles = [];
                 this.minObstacles = 4;
                 this.maxObstacles = 8;
-                this.minSize = 20;
-                this.maxSize = 200;
-                this.padding = 50; // Minimum space between obstacles
+                this.wallThickness = 10; // Thickness of walls
+                this.minLength = 100;
+                this.maxLength = 250;
+                this.padding = 50;
                 this.initializeObstacles();
             }
 
@@ -16,21 +17,58 @@
                 const numObstacles = Math.floor(Math.random() * (this.maxObstacles - this.minObstacles + 1)) + this.minObstacles;
                 
                 let attempts = 0;
-                const maxAttempts = 100; // Prevent infinite loops
+                const maxAttempts = 100;
 
                 while (this.obstacles.length < numObstacles && attempts < maxAttempts) {
-                    const width = Math.random() * (this.maxSize - this.minSize) + this.minSize;
-                    const height = Math.random() * (this.maxSize - this.minSize) + this.minSize;
-                    const x = Math.random() * (this.canvas.width - width);
-                    const y = Math.random() * (this.canvas.height - height);
+                    // Generate an L-shaped or straight wall
+                    const isLShaped = Math.random() < 0.6; // 60% chance of L-shaped walls
+                    
+                    if (isLShaped) {
+                        const mainLength = Math.random() * (this.maxLength - this.minLength) + this.minLength;
+                        const secondaryLength = Math.random() * (this.maxLength - this.minLength) + this.minLength;
+                        const isHorizontalFirst = Math.random() < 0.5;
+                        
+                        const x = Math.random() * (this.canvas.width - (isHorizontalFirst ? mainLength : this.wallThickness));
+                        const y = Math.random() * (this.canvas.height - (isHorizontalFirst ? this.wallThickness : mainLength));
+                        
+                        // Create two rectangles that form an L shape
+                        const rect1 = {
+                            x: x,
+                            y: y,
+                            width: isHorizontalFirst ? mainLength : this.wallThickness,
+                            height: isHorizontalFirst ? this.wallThickness : mainLength
+                        };
+                        
+                        const rect2 = {
+                            x: isHorizontalFirst ? x + mainLength - this.wallThickness : x,
+                            y: isHorizontalFirst ? y : y + mainLength - this.wallThickness,
+                            width: isHorizontalFirst ? this.wallThickness : secondaryLength,
+                            height: isHorizontalFirst ? secondaryLength : this.wallThickness
+                        };
 
-                    const newObstacle = { x, y, width, height };
+                        if (!this.isOverlapping(rect1) && !this.isOverlapping(rect2) && 
+                            !this.isBlockingCenter(rect1) && !this.isBlockingCenter(rect2)) {
+                            this.obstacles.push(rect1, rect2);
+                        }
+                    } else {
+                        // Generate a straight wall
+                        const isHorizontal = Math.random() < 0.5;
+                        const length = Math.random() * (this.maxLength - this.minLength) + this.minLength;
+                        
+                        const x = Math.random() * (this.canvas.width - (isHorizontal ? length : this.wallThickness));
+                        const y = Math.random() * (this.canvas.height - (isHorizontal ? this.wallThickness : length));
+                        
+                        const newObstacle = {
+                            x: x,
+                            y: y,
+                            width: isHorizontal ? length : this.wallThickness,
+                            height: isHorizontal ? this.wallThickness : length
+                        };
 
-                    // Check if the new obstacle overlaps with existing ones or is too close
-                    if (!this.isOverlapping(newObstacle) && !this.isBlockingCenter(newObstacle)) {
-                        this.obstacles.push(newObstacle);
+                        if (!this.isOverlapping(newObstacle) && !this.isBlockingCenter(newObstacle)) {
+                            this.obstacles.push(newObstacle);
+                        }
                     }
-
                     attempts++;
                 }
             }
@@ -80,24 +118,23 @@
 
             handleEnemyCollision(enemy) {
                 this.obstacles.forEach(obstacle => {
-                    const nextX = enemy.x + enemy.dx;
-                    const nextY = enemy.y + enemy.dy;
-
-                    if (nextX < obstacle.x + obstacle.width &&
-                        nextX + enemySize > obstacle.x &&
-                        nextY < obstacle.y + obstacle.height &&
-                        nextY + enemySize > obstacle.y) {
-
-                        const left = nextX + enemySize - obstacle.x;
-                        const right = obstacle.x + obstacle.width - nextX;
-                        const top = nextY + enemySize - obstacle.y;
-                        const bottom = obstacle.y + obstacle.height - nextY;
-                        const min = Math.min(left, right, top, bottom);
-
-                        if (min === left || min === right) {
+                    const enemyCenterX = enemy.x + enemySize / 2;
+                    const enemyCenterY = enemy.y + enemySize / 2;
+                    const enemyRadius = enemySize / 2;
+                    
+                    // Calculate closest point on rectangle to circle center
+                    const closestX = Math.max(obstacle.x, Math.min(enemyCenterX, obstacle.x + obstacle.width));
+                    const closestY = Math.max(obstacle.y, Math.min(enemyCenterY, obstacle.y + obstacle.height));
+                    
+                    const dx = enemyCenterX - closestX;
+                    const dy = enemyCenterY - closestY;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (distance < enemyRadius) {
+                        // Collision detected, determine bounce direction
+                        if (Math.abs(dx) > Math.abs(dy)) {
                             enemy.dx *= -1;
-                        }
-                        if (min === top || min === bottom) {
+                        } else {
                             enemy.dy *= -1;
                         }
                     }
@@ -107,11 +144,33 @@
             getValidSpawnPosition(objectSize) {
                 let x, y;
                 let validPosition = false;
+                let attempts = 0;
+                const maxAttempts = 100;
 
-                while (!validPosition) {
+                while (!validPosition && attempts < maxAttempts) {
                     x = Math.random() * (this.canvas.width - objectSize);
                     y = Math.random() * (this.canvas.height - objectSize);
+                    
+                    // Check if position overlaps with terrain
                     validPosition = !this.checkCollision(x, y, objectSize, objectSize);
+                    
+                    // Add padding around terrain for dots
+                    if (validPosition) {
+                        const padding = 5; // 5 pixels padding
+                        validPosition = !this.obstacles.some(obstacle => {
+                            return (x - padding < obstacle.x + obstacle.width &&
+                                    x + objectSize + padding > obstacle.x &&
+                                    y - padding < obstacle.y + obstacle.height &&
+                                    y + objectSize + padding > obstacle.y);
+                        });
+                    }
+                    
+                    attempts++;
+                }
+
+                // If we couldn't find a valid position after max attempts, try again with no padding
+                if (!validPosition) {
+                    return this.getValidSpawnPosition(objectSize);
                 }
 
                 return { x, y };
@@ -123,7 +182,7 @@
 		const ENEMY_SPEED_INCREASE = 0.5; // Speed increase per difficulty level
 		const ENEMY_COUNT_INCREASE = 1; // How many enemies to add per difficulty level
 		const MAX_ENEMIES = 15; // Maximum number of enemies allowed
-		const BASE_ENEMY_SPEED = 1; // Starting speed
+		const BASE_ENEMY_SPEED = 3; // Starting speed
 		const BASE_ENEMY_COUNT = 3; // Starting number of enemies
 
 		// Modify these variables to be calculated based on difficulty
@@ -135,11 +194,16 @@
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
+        // Modify canvas size (add near the top after getting canvas element)
+        canvas.width = canvas.width * 1.25;
+        canvas.height = canvas.height * 1.25;
+
         // Player properties
-        const playerSize = 30;
+        const INITIAL_PLAYER_SIZE = 30;
+        let playerSize = INITIAL_PLAYER_SIZE;
         let playerX = canvas.width / 2 - playerSize / 2;
         let playerY = canvas.height / 2 - playerSize / 2;
-        const playerSpeed = 2;
+        const playerSpeed = 9; // Increased from 3 (300%)
 
         // Point properties
         const pointSize = 10;
@@ -168,41 +232,98 @@
         let fps = 0;
         let lastTime = performance.now();
 
-		// Add this function to calculate difficulty based on score
+		// Add these variables near the top with other game properties
+		let levelMessageTimer = 0;
+		let showingLevelMessage = false;
+
+		// Add these variables near the top with other game properties
+		let dotsCollected = 0;
+		let DOTS_PER_LEVEL = 5;
+		let lastTimeScoreUpdate = performance.now();
+		const POINTS_PER_SECOND = 15;
+		const POINTS_PER_DOT = 50;
+
+		// Add near the top with other game properties
+		const PLAYER_GROWTH_RATE = 0.5; // Grow by 0.5 pixels per dot
+		const TARGET_FPS = 60;
+		const FRAME_TIME = 1000 / TARGET_FPS;
+		let lastFrameTime = 0;
+
+		// Add near the top with other game properties
+		const MAX_HEALTH = 3;
+		let playerHealth = MAX_HEALTH;
+
+		// Add these near the top with other player properties
+		const PLAYER_ACCELERATION = 0.8;
+		const PLAYER_DECELERATION = 0.8;
+		const MAX_PLAYER_SPEED = 9;
+		let playerVelocityX = 0;
+		let playerVelocityY = 0;
+
+		// Modify the updateDifficulty function
 		function updateDifficulty() {
-			const difficultyLevel = Math.floor(score / DIFFICULTY_INCREASE_INTERVAL);
-			if (difficultyLevel > lastDifficultyIncrease) {
-				lastDifficultyIncrease = difficultyLevel;
+			if (dotsCollected >= DOTS_PER_LEVEL) {
+				lastDifficultyIncrease++;
+				// Add bonus points for completing the level
+				score += lastDifficultyIncrease * 120;
+				dotsCollected = 0; // Reset dot counter
 				increaseDifficulty();
 			}
 		}
 
-		// Add this function to handle difficulty increases
+		// Modify the increaseDifficulty function
 		function increaseDifficulty() {
 			currentEnemySpeed = BASE_ENEMY_SPEED + (ENEMY_SPEED_INCREASE * lastDifficultyIncrease);
 			
-			// Calculate new enemy count, but don't exceed maximum
+			// Calculate how many new enemies to add
 			const newEnemyCount = BASE_ENEMY_COUNT + (ENEMY_COUNT_INCREASE * lastDifficultyIncrease);
-			currentEnemyCount = Math.min(newEnemyCount, MAX_ENEMIES);
+			const targetEnemyCount = Math.min(newEnemyCount, MAX_ENEMIES);
+			const enemiesToAdd = targetEnemyCount - enemies.length;
 			
-			// Reinitialize enemies with new speed and count
-			initializeEnemies();
+			// Add new enemies if needed
+			for (let i = 0; i < enemiesToAdd; i++) {
+				spawnNewEnemyAwayFromPlayer();
+			}
 			
-			// Optional: Show difficulty increase message
-			showDifficultyMessage();
+			// Update existing enemies speed
+			enemies.forEach(enemy => {
+				const speed = Math.sqrt(enemy.dx * enemy.dx + enemy.dy * enemy.dy);
+				const normalizedDx = enemy.dx / speed;
+				const normalizedDy = enemy.dy / speed;
+				enemy.dx = normalizedDx * currentEnemySpeed;
+				enemy.dy = normalizedDy * currentEnemySpeed;
+			});
+			
+			// Show level message
+			showingLevelMessage = true;
+			levelMessageTimer = 1500; // 1.5 seconds
 		}
 
-		// Add this function to show a temporary message when difficulty increases
-		function showDifficultyMessage() {
-			const message = `Level ${lastDifficultyIncrease + 1}!`;
-			ctx.fillStyle = 'red';
-			ctx.font = 'bold 40px Arial';
-			ctx.fillText(message, canvas.width/2 - 50, canvas.height/2);
-			
-			// Remove the message after 1 second
-			setTimeout(() => {
-				clearCanvas();
-			}, 1000);
+		// Add this new function to spawn enemies away from player
+		function spawnNewEnemyAwayFromPlayer() {
+			const minDistanceFromPlayer = 200; // Minimum distance from player
+			let spawnPos;
+			let attempts = 0;
+			const maxAttempts = 100;
+
+			do {
+				spawnPos = terrain.getValidSpawnPosition(enemySize);
+				const distanceToPlayer = Math.sqrt(
+					Math.pow(spawnPos.x - playerX, 2) + 
+					Math.pow(spawnPos.y - playerY, 2)
+				);
+				if (distanceToPlayer >= minDistanceFromPlayer) {
+					break;
+				}
+				attempts++;
+			} while (attempts < maxAttempts);
+
+			enemies.push({
+				x: spawnPos.x,
+				y: spawnPos.y,
+				dx: (Math.random() < 0.5 ? -1 : 1) * currentEnemySpeed,
+				dy: (Math.random() < 0.5 ? -1 : 1) * currentEnemySpeed
+			});
 		}
 
 		// Modify initializeEnemies to use current difficulty settings
@@ -219,26 +340,44 @@
 			}
 		}
 
-		// Modify resetGame to reset difficulty
+		// Modify resetGame to reset difficulty and dots collected
 		function resetGame() {
+			// Regenerate terrain
+			terrain.initializeObstacles();
+			
+			// Reset player position and properties
+			playerSize = INITIAL_PLAYER_SIZE; // Reset player size
+			playerHealth = MAX_HEALTH; // Reset health
 			const playerSpawn = terrain.getValidSpawnPosition(playerSize);
 			playerX = playerSpawn.x;
 			playerY = playerSpawn.y;
 			
+			// Reset point position
 			const pointSpawn = terrain.getValidSpawnPosition(pointSize);
 			pointX = pointSpawn.x;
 			pointY = pointSpawn.y;
 			
+			// Reset game state
 			score = 0;
+			dotsCollected = 0;
+			lastTimeScoreUpdate = performance.now();
 			lastDifficultyIncrease = 0;
 			currentEnemySpeed = BASE_ENEMY_SPEED;
 			currentEnemyCount = BASE_ENEMY_COUNT;
+			isPaused = false;
 			initializeEnemies();
-}
+			resetPlayerVelocity();
+		}
 
         document.addEventListener('keydown', (e) => {
             if (keys.hasOwnProperty(e.key)) {
                 keys[e.key] = true;
+            }
+            if (e.key === 'p' || e.key === 'P') {
+                isPaused = !isPaused;
+            }
+            if (e.key === 'r' || e.key === 'R') {
+                resetGame();
             }
         });
 
@@ -249,17 +388,69 @@
         });
 
         function updatePlayerPosition() {
-            let newX = playerX;
-            let newY = playerY;
+            // Calculate desired direction
+            let targetDx = 0;
+            let targetDy = 0;
 
-            if (keys.ArrowUp && playerY > 0) newY -= playerSpeed;
-            if (keys.ArrowDown && playerY < canvas.height - playerSize) newY += playerSpeed;
-            if (keys.ArrowLeft && playerX > 0) newX -= playerSpeed;
-            if (keys.ArrowRight && playerX < canvas.width - playerSize) newX += playerSpeed;
+            if (keys.ArrowUp) targetDy -= 1;
+            if (keys.ArrowDown) targetDy += 1;
+            if (keys.ArrowLeft) targetDx -= 1;
+            if (keys.ArrowRight) targetDx += 1;
 
-            if (!terrain.checkCollision(newX, newY, playerSize, playerSize)) {
+            // Normalize diagonal input
+            if (targetDx !== 0 && targetDy !== 0) {
+                const normalizer = 1 / Math.sqrt(2);
+                targetDx *= normalizer;
+                targetDy *= normalizer;
+            }
+
+            // Apply acceleration
+            if (targetDx !== 0) {
+                playerVelocityX += targetDx * PLAYER_ACCELERATION;
+            } else {
+                // Apply deceleration when no input
+                playerVelocityX *= PLAYER_DECELERATION;
+            }
+
+            if (targetDy !== 0) {
+                playerVelocityY += targetDy * PLAYER_ACCELERATION;
+            } else {
+                // Apply deceleration when no input
+                playerVelocityY *= PLAYER_DECELERATION;
+            }
+
+            // Clamp velocities to max speed
+            const currentSpeed = Math.sqrt(playerVelocityX * playerVelocityX + playerVelocityY * playerVelocityY);
+            if (currentSpeed > MAX_PLAYER_SPEED) {
+                const scale = MAX_PLAYER_SPEED / currentSpeed;
+                playerVelocityX *= scale;
+                playerVelocityY *= scale;
+            }
+
+            // Stop completely if moving very slowly
+            if (Math.abs(playerVelocityX) < 0.01) playerVelocityX = 0;
+            if (Math.abs(playerVelocityY) < 0.01) playerVelocityY = 0;
+
+            // Try moving on each axis separately
+            let newX = playerX + playerVelocityX;
+            let newY = playerY + playerVelocityY;
+
+            // Clamp to canvas boundaries
+            newX = Math.max(0, Math.min(canvas.width - playerSize, newX));
+            newY = Math.max(0, Math.min(canvas.height - playerSize, newY));
+
+            // Check X movement and stop velocity if collision
+            if (!terrain.checkCollision(newX, playerY, playerSize, playerSize)) {
                 playerX = newX;
+            } else {
+                playerVelocityX = 0;
+            }
+
+            // Check Y movement and stop velocity if collision
+            if (!terrain.checkCollision(playerX, newY, playerSize, playerSize)) {
                 playerY = newY;
+            } else {
+                playerVelocityY = 0;
             }
         }
 
@@ -285,19 +476,41 @@
 				playerX + playerSize > pointX &&
 				playerY < pointY + pointSize &&
 				playerY + playerSize > pointY) {
-				score++;
-				updateDifficulty(); // Add this line
+				
+				// Add points for collecting dot
+				score += POINTS_PER_DOT;
+				dotsCollected++;
+				
+				// Increase player size
+				playerSize += PLAYER_GROWTH_RATE;
+				
+				updateDifficulty();
 				const pointSpawn = terrain.getValidSpawnPosition(pointSize);
 				pointX = pointSpawn.x;
 				pointY = pointSpawn.y;
 			}
 
+			// Enemy collision check with health system
 			enemies.forEach(enemy => {
-				if (playerX < enemy.x + enemySize &&
-					playerX + playerSize > enemy.x &&
-					playerY < enemy.y + enemySize &&
-					playerY + playerSize > enemy.y) {
-					resetGame();
+				const playerCenterX = playerX + playerSize / 2;
+				const playerCenterY = playerY + playerSize / 2;
+				const enemyCenterX = enemy.x + enemySize / 2;
+				const enemyCenterY = enemy.y + enemySize / 2;
+				
+				const dx = playerCenterX - enemyCenterX;
+				const dy = playerCenterY - enemyCenterY;
+				const distance = Math.sqrt(dx * dx + dy * dy);
+				
+				if (distance < (playerSize / 2 + enemySize / 2)) {
+					playerHealth--;
+					if (playerHealth <= 0) {
+						resetGame();
+					} else {
+						// Respawn the enemy away from the player
+						const newSpawn = terrain.getValidSpawnPosition(enemySize);
+						enemy.x = newSpawn.x;
+						enemy.y = newSpawn.y;
+					}
 				}
 			});
 		}
@@ -308,14 +521,22 @@
         }
 
         function drawEnemies() {
-            ctx.fillStyle = 'green';
+            ctx.fillStyle = 'red';  // Changed from green
             enemies.forEach(enemy => {
-                ctx.fillRect(enemy.x, enemy.y, enemySize, enemySize);
+                ctx.beginPath();
+                ctx.arc(
+                    enemy.x + enemySize / 2,
+                    enemy.y + enemySize / 2,
+                    enemySize / 2,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.fill();
             });
         }
 
         function drawPoint() {
-            ctx.fillStyle = 'red';
+            ctx.fillStyle = 'green';  // Changed from red
             ctx.fillRect(pointX, pointY, pointSize, pointSize);
         }
 
@@ -325,7 +546,8 @@
 			ctx.font = '20px Arial';
 			ctx.fillText(`Score: ${score}`, 10, 30);
 			ctx.fillText(`Level: ${lastDifficultyIncrease + 1}`, 10, 90);
-			ctx.fillText(`Enemies: ${currentEnemyCount}`, 10, 120);
+			ctx.fillText(`Dots: ${dotsCollected}/${DOTS_PER_LEVEL}`, 10, 120);
+			ctx.fillText(`Enemies: ${enemies.length}`, 10, 150);
 		}
 
         function drawFPS() {
@@ -334,27 +556,119 @@
             ctx.fillText(`FPS: ${fps}`, 10, 60);
         }
 
+        function drawHealth() {
+            const heartSize = 20;
+            const heartSpacing = 25;
+            const startX = canvas.width - (MAX_HEALTH * heartSpacing);
+            const startY = 20;
+
+            ctx.fillStyle = 'red';
+            for (let i = 0; i < playerHealth; i++) {
+                // Draw a heart shape
+                ctx.beginPath();
+                const x = startX + (i * heartSpacing);
+                const y = startY;
+                
+                // Draw heart using bezier curves
+                ctx.moveTo(x + heartSize/2, y + heartSize/4);
+                
+                // Left curve
+                ctx.bezierCurveTo(
+                    x, y, 
+                    x, y + heartSize/2, 
+                    x + heartSize/2, y + heartSize
+                );
+                
+                // Right curve
+                ctx.bezierCurveTo(
+                    x + heartSize, y + heartSize/2, 
+                    x + heartSize, y, 
+                    x + heartSize/2, y + heartSize/4
+                );
+                
+                ctx.fill();
+            }
+        }
+
         function clearCanvas() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
         }
 
-        function gameLoop() {
-            const currentTime = performance.now();
-            const deltaTime = currentTime - lastTime;
-            lastTime = currentTime;
+        // Add this near the top with other game properties
+        let isPaused = false;
 
-            fps = Math.round(1000 / deltaTime);
+        // Modify the gameLoop function to handle pausing
+        function gameLoop(timestamp) {
+            // Calculate time since last frame
+            const deltaTime = timestamp - lastFrameTime;
+            
+            // Only update if enough time has passed
+            if (deltaTime >= FRAME_TIME) {
+                lastFrameTime = timestamp - (deltaTime % FRAME_TIME);
+                
+                const currentTime = performance.now();
+                fps = Math.round(1000 / deltaTime);
 
-            clearCanvas();
-            terrain.draw(ctx);
-            updatePlayerPosition();
-            updateEnemies();
-            checkCollision();
-            drawPlayer();
-            drawEnemies();
-            drawPoint();
-            drawScore();
-            drawFPS();
+                clearCanvas();
+                terrain.draw(ctx);
+                
+                if (!isPaused) {
+                    // Add time-based scoring
+                    const timeSinceLastScore = currentTime - lastTimeScoreUpdate;
+                    if (timeSinceLastScore >= 1000) {
+                        score += POINTS_PER_SECOND;
+                        lastTimeScoreUpdate = currentTime;
+                    }
+
+                    updatePlayerPosition();
+                    updateEnemies();
+                    checkCollision();
+                    
+                    if (showingLevelMessage) {
+                        levelMessageTimer -= deltaTime;
+                        if (levelMessageTimer <= 0) {
+                            showingLevelMessage = false;
+                        }
+                    }
+                } else {
+                    lastTimeScoreUpdate = currentTime;
+                }
+                
+                drawPlayer();
+                drawEnemies();
+                drawPoint();
+                drawScore();
+                drawFPS();
+                drawHealth();
+
+                // Draw level message if active
+                if (showingLevelMessage) {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    ctx.fillStyle = 'white';
+                    ctx.font = 'bold 48px Arial';
+                    const levelText = `Level ${lastDifficultyIncrease + 1}!`;
+                    const textMetrics = ctx.measureText(levelText);
+                    const textX = (canvas.width - textMetrics.width) / 2;
+                    const textY = canvas.height / 2;
+                    ctx.fillText(levelText, textX, textY);
+                }
+
+                // Draw pause message if game is paused
+                if (isPaused) {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    ctx.fillStyle = 'white';
+                    ctx.font = 'bold 48px Arial';
+                    const pauseText = 'PAUSED';
+                    const textMetrics = ctx.measureText(pauseText);
+                    const textX = (canvas.width - textMetrics.width) / 2;
+                    const textY = canvas.height / 2;
+                    ctx.fillText(pauseText, textX, textY);
+                }
+            }
 
             requestAnimationFrame(gameLoop);
         }
@@ -362,3 +676,9 @@
         // Start the game
         initializeEnemies();
         gameLoop();
+
+        // Add this function to reset player velocity when game resets
+        function resetPlayerVelocity() {
+            playerVelocityX = 0;
+            playerVelocityY = 0;
+        }
